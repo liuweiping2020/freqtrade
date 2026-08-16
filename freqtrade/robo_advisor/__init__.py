@@ -22,6 +22,7 @@ __all__ = [
     "RiskQuestionnaire",
     "RiskAssessor",
     "BaseAllocator",
+    "AllocationResult",
     "MarkowitzAllocator",
     "RiskParityAllocator",
     "BlackLittermanAllocator",
@@ -60,13 +61,14 @@ def __getattr__(name):
     """Lazy import to reduce startup overhead."""
     _import_map = {
         # P0
-        "InvestorProfile": (".user_profile", "InvestorProfile"),
-        "RiskQuestionnaire": (".user_profile", "RiskQuestionnaire"),
-        "RiskAssessor": (".user_profile", "RiskAssessor"),
-        "BaseAllocator": (".asset_allocator", "BaseAllocator"),
-        "MarkowitzAllocator": (".asset_allocator", "MarkowitzAllocator"),
-        "RiskParityAllocator": (".asset_allocator", "RiskParityAllocator"),
-        "BlackLittermanAllocator": (".asset_allocator", "BlackLittermanAllocator"),
+    "InvestorProfile": (".user_profile", "InvestorProfile"),
+    "RiskQuestionnaire": (".user_profile", "RiskQuestionnaire"),
+    "RiskAssessor": (".user_profile", "RiskAssessor"),
+    "BaseAllocator": (".asset_allocator", "BaseAllocator"),
+    "AllocationResult": (".asset_allocator", "AllocationResult"),
+    "MarkowitzAllocator": (".asset_allocator", "MarkowitzAllocator"),
+    "RiskParityAllocator": (".asset_allocator", "RiskParityAllocator"),
+    "BlackLittermanAllocator": (".asset_allocator", "BlackLittermanAllocator"),
         # P1
         "FactorPurifier": (".factor_purifier", "FactorPurifier"),
         "FactorAnalyzer": (".factor_analyzer", "FactorAnalyzer"),
