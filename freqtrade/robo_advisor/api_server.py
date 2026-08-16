@@ -31,11 +31,13 @@ from __future__ import annotations
 
 import os
 import time
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 from freqtrade.robo_advisor import (
@@ -164,6 +166,9 @@ APP_DESCRIPTION = """
 def create_app() -> FastAPI:
     app = FastAPI(title=APP_TITLE, description=APP_DESCRIPTION, version="0.1.0")
 
+    # 静态 Dashboard 目录：本文件同级 ui/
+    UI_DIR = Path(__file__).resolve().parent / "ui"
+
     # 复用引擎实例（无状态，可全局）
     assessor = RiskAssessor()
     sentiment_lex = SentimentAnalyzer(backend="lexicon")
@@ -171,11 +176,16 @@ def create_app() -> FastAPI:
 
     # -------- 首页 & 健康 --------
     @app.get("/", tags=["system"])
-    async def index():
+    async def index(request: Request):
+        accept = request.headers.get("accept", "")
+        prefers_html = "text/html" in accept and "application/json" not in accept
+        if prefers_html:
+            return RedirectResponse(url="/ui", status_code=302)
         return {
             "service": APP_TITLE,
             "status": "running",
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "dashboard_ui": "/ui",
             "endpoints": {
                 "swagger_ui": "/docs",
                 "redoc": "/redoc",
@@ -193,6 +203,14 @@ def create_app() -> FastAPI:
                 "report_summarize": "/api/v1/report/summarize (POST)",
             },
         }
+
+    @app.get("/ui", tags=["ui"], include_in_schema=False)
+    @app.get("/ui/", tags=["ui"], include_in_schema=False)
+    async def dashboard_ui():
+        path = UI_DIR / "dashboard.html"
+        if not path.exists():
+            raise HTTPException(status_code=404, detail="Dashboard file not found: ui/dashboard.html")
+        return FileResponse(path, media_type="text/html; charset=utf-8")
 
     @app.get("/healthz", tags=["system"])
     async def healthz():

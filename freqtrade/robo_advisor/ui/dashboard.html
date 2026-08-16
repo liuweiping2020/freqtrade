@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Freqtrade Robo-Advisor · 智能投研 Dashboard</title>
+<style>
+  :root{
+    --bg:#f4f6fb; --panel:#ffffff; --line:#e6e9f2;
+    --text:#1f2430; --muted:#6b7280;
+    --primary:#2563eb; --primary-600:#1d4ed8; --primary-50:#eef2ff;
+    --ok:#059669; --warn:#d97706; --err:#dc2626;
+    --chip:#eef2ff; --chip-text:#3730a3;
+    --radius:12px; --shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.05);
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#0f172a; --panel:#111c34; --line:#253051; --text:#e5e7eb; --muted:#94a3b8;
+           --chip:#1e293b; --chip-text:#c7d2fe; --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35); }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Helvetica,Arial,sans-serif;}
+  a{color:var(--primary)}
+  .topbar{position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);
+          display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:.2px;}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 4px rgba(107,114,128,.18)}
+  .brand.ok .dot{background:var(--ok);box-shadow:0 0 0 4px rgba(5,150,105,.18)}
+  .brand.bad .dot{background:var(--err);box-shadow:0 0 0 4px rgba(220,38,38,.18)}
+  .topnav{display:flex;gap:6px;flex-wrap:wrap}
+  .topnav a{color:var(--muted);text-decoration:none;padding:6px 10px;border-radius:8px;font-size:13px}
+  .topnav a:hover{background:var(--line);color:var(--text)}
+  .status{font-size:12px;color:var(--muted)}
+  main{max-width:1120px;margin:0 auto;padding:20px 20px 60px;}
+  .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-bottom:18px;flex-wrap:wrap}
+  .tab{padding:10px 14px;cursor:pointer;border-bottom:2px solid transparent;color:var(--muted);font-weight:600;font-size:14px}
+  .tab.active{color:var(--primary);border-color:var(--primary)}
+  .tab:hover{color:var(--text)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;margin-bottom:18px}
+  .panel h2{margin:0 0 12px;font-size:17px}
+  .hint{color:var(--muted);font-size:12px;margin:-6px 0 12px}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end}
+  .field{flex:1 1 200px;display:flex;flex-direction:column;gap:6px}
+  label{font-size:12px;color:var(--muted);font-weight:600}
+  input,select,textarea{font:inherit;color:inherit;background:var(--panel);border:1px solid var(--line);
+        border-radius:8px;padding:8px 10px;width:100%;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+  textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.5}
+  button{font:inherit;cursor:pointer;border:0;border-radius:8px;padding:9px 14px;font-weight:600;
+         background:var(--primary);color:#fff;transition:background .15s}
+  button:hover{background:var(--primary-600)}
+  button.ghost{background:transparent;color:var(--primary);border:1px solid var(--line)}
+  button.ghost:hover{background:var(--primary-50);border-color:var(--primary)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .qlist{display:grid;gap:10px}
+  .qitem{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:10px}
+  .qitem .t{font-size:13px}
+  .op{display:flex;gap:4px}
+  .op button{padding:6px 10px;font-size:12px;background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .op button.picked{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .kv{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 16px}
+  @media (min-width:720px){.kv{grid-template-columns:repeat(4,minmax(0,1fr))}}
+  .kv .k{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .kv .v{font-size:15px;font-weight:700;font-family:var(--mono)}
+  .mix-bars{display:grid;gap:8px;margin-top:12px}
+  .mix-bars .r{display:grid;grid-template-columns:90px 1fr 72px;gap:10px;align-items:center;font-size:13px}
+  .bar{height:10px;background:var(--line);border-radius:999px;overflow:hidden}
+  .bar>div{height:100%;background:linear-gradient(90deg,#60a5fa,#2563eb);border-radius:999px}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line)}
+  th{background:var(--chip);color:var(--chip-text);font-size:12px;text-transform:uppercase;letter-spacing:.3px}
+  .chip{display:inline-block;padding:2px 8px;border-radius:999px;background:var(--chip);color:var(--chip-text);font-size:11px;font-weight:700;margin-right:4px}
+  .chip.buy{background:rgba(5,150,105,.12);color:var(--ok)}
+  .chip.sell{background:rgba(220,38,38,.12);color:var(--err)}
+  .chip.warn{background:rgba(217,119,6,.14);color:var(--warn)}
+  ul.reasons{margin:0;padding-left:18px;color:var(--text)}
+  pre.err{background:rgba(220,38,38,.08);border:1px solid rgba(220,38,38,.3);color:var(--err);
+          padding:10px 12px;border-radius:8px;font-size:12px;white-space:pre-wrap;font-family:var(--mono)}
+  /* report md */
+  .md h1{font-size:20px;margin:14px 0 6px}
+  .md h2{font-size:17px;margin:14px 0 6px;padding-bottom:4px;border-bottom:1px solid var(--line)}
+  .md h3{font-size:15px;margin:12px 0 4px}
+  .md p{margin:6px 0;font-size:14px;line-height:1.7}
+  .md ul,.md ol{margin:6px 0;padding-left:22px}
+  .md li{margin:3px 0}
+  .md code{background:var(--chip);color:var(--chip-text);padding:1px 6px;border-radius:4px;font-family:var(--mono);font-size:12px}
+  .md table{margin:8px 0;font-size:13px}
+  .md th,.md td{border:1px solid var(--line);padding:6px 10px}
+  .md th{background:var(--chip)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div id="brand" class="brand"><span class="dot"></span>
+    <div>Freqtrade Robo-Advisor · 智能投研 Dashboard
+      <div class="status" id="status">检测后端连接…</div>
+    </div>
+  </div>
+  <nav class="topnav">
+    <a href="/ui">Dashboard</a>
+    <a href="/docs" target="_blank" rel="noreferrer">Swagger /docs</a>
+    <a href="/redoc" target="_blank" rel="noreferrer">Redoc</a>
+    <a href="/openapi.json" target="_blank" rel="noreferrer">OpenAPI</a>
+  </nav>
+</header>
+
+<main>
+<div class="tabs" role="tablist">
+  <div class="tab active" data-tab="profile">① 风险问卷 &amp; 投资者画像</div>
+  <div class="tab" data-tab="allocate">② 资产配置（Risk Parity / Markowitz）</div>
+  <div class="tab" data-tab="rebalance">③ 组合再平衡检测 &amp; 订单</div>
+  <div class="tab" data-tab="report">④ 组合绩效报告</div>
+</div>
+
+<!-- ======= ① 画像 ======= -->
+<section class="tab-panel" id="tab-profile">
+  <div class="panel">
+    <h2>风险问卷（KYC 10 题 · 每题 1=最低，5=最高）</h2>
+    <div class="hint">点 <b>用 seed 生成示例</b> 可自动填一套答案（默认 seed=7，对应 R3 中等风险），或手动点每道题的 1~5。</div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field">
+        <label>seed</label>
+        <input id="profileSeed" type="number" value="7" min="0" />
+      </div>
+      <div class="field">
+        <label>投资期限</label>
+        <select id="profileHorizon">
+          <option value="short">short &lt; 1 年</option>
+          <option value="medium" selected>medium 1~5 年</option>
+          <option value="long">long &gt; 5 年</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>财务目标</label>
+        <select id="profileGoal">
+          <option value="capital_preservation">capital_preservation · 保本</option>
+          <option value="steady_growth" selected>steady_growth · 稳健增值</option>
+          <option value="aggressive_growth">aggressive_growth · 进取</option>
+          <option value="speculation">speculation · 投机</option>
+        </select>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="profileSeedBtn" class="ghost" type="button">用 seed 生成示例</button>
+        <button id="profileRunBtn" type="button">开始画像评估</button>
+      </div>
+    </div>
+    <div id="profileQuestions" class="qlist">加载中…</div>
+  </div>
+
+  <div class="panel" id="profileResultPanel" style="display:none">
+    <h2>投资者画像结果</h2>
+    <div id="profileResult"></div>
+  </div>
+</section>
+
+<!-- ======= ② 资产配置 ======= -->
+<section class="tab-panel" id="tab-allocate" style="display:none">
+  <div class="panel">
+    <h2>资产配置引擎</h2>
+    <div class="hint">内置 252 天 Demo 收益率（BTC/ETH/SOL/USDT 近似正态生成），直接点 <b>一键用 Demo 数据计算</b>；也可在下方 JSON 里改成自己的收益率序列。</div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field">
+        <label>模型</label>
+        <select id="allocModel">
+          <option value="risk_parity">Risk Parity（风险平价）</option>
+          <option value="markowitz">Markowitz · Max Sharpe</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>品种（逗号分隔）</label>
+        <input id="allocSymbols" value="BTC,ETH,SOL,USDT" />
+      </div>
+      <div class="field">
+        <label>单品种最大权重</label>
+        <input id="allocMaxW" type="number" step="0.01" value="0.6" min="0" max="1" />
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="allocGenBtn" class="ghost" type="button">生成 Demo 收益率 JSON</button>
+        <button id="allocRunBtn" type="button">一键用 Demo 数据计算</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>请求 JSON（symbols / returns_pct / max_weight / objective…）</label>
+      <textarea id="allocJson" rows="12" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div class="panel" id="allocResultPanel" style="display:none">
+    <h2>配置结果</h2>
+    <div id="allocSummary"></div>
+    <div id="allocWeights" class="mix-bars"></div>
+  </div>
+</section>
+
+<!-- ======= ③ 再平衡 ======= -->
+<section class="tab-panel" id="tab-rebalance" style="display:none">
+  <div class="panel">
+    <h2>再平衡检测</h2>
+    <div class="hint">默认示例：BTC 超配 12%，距上次再平衡 45 天，总资产 $100k。点击 <b>检测并生成订单</b>。</div>
+    <div class="field" style="margin-bottom:12px">
+      <label>请求 JSON（current/target 权重、价格、总市值、距上次再平衡天数）</label>
+      <textarea id="rebJson" rows="10" spellcheck="false">{
+  "current_weights":  {"BTC":0.62, "ETH":0.11, "SOL":0.05, "BNB":0.09, "USDT":0.13},
+  "target_weights":   {"BTC":0.50, "ETH":0.12, "SOL":0.10, "BNB":0.12, "USDT":0.16},
+  "current_prices":   {"BTC":68000, "ETH":3500, "SOL":150, "BNB":600, "USDT":1.0},
+  "total_portfolio_value_usdt": 100000,
+  "last_rebalance_days_ago": 45
+}</textarea>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button id="rebRunBtn" type="button">检测并生成订单</button>
+    </div>
+  </div>
+
+  <div class="panel" id="rebResultPanel" style="display:none">
+    <h2>再平衡结果</h2>
+    <div id="rebTop"></div>
+    <h3 style="margin-top:14px;font-size:14px;color:var(--muted)">调仓订单</h3>
+    <div id="rebOrders"></div>
+  </div>
+</section>
+
+<!-- ======= ④ 报告 ======= -->
+<section class="tab-panel" id="tab-report" style="display:none">
+  <div class="panel">
+    <h2>绩效报告生成</h2>
+    <div class="hint">直接点击 <b>生成 Demo 报告</b>：前端生成 250 天净值曲线，POST /api/v1/report/summarize，按 Markdown 输出并渲染到下方。</div>
+    <div class="row">
+      <div class="field">
+        <label>随机种子</label>
+        <input id="repSeed" type="number" value="3" />
+      </div>
+      <div class="field">
+        <label>无风险利率（年化）</label>
+        <input id="repRf" type="number" step="0.005" value="0.04" />
+      </div>
+      <div style="display:flex;gap:8px">
+        <button id="repRunBtn" type="button">生成 Demo 报告</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel" id="repResultPanel" style="display:none">
+    <h2>报告</h2>
+    <div id="repContent" class="md"></div>
+  </div>
+</section>
+</main>
+
+<script>
+/* ======================= 工具 ======================= */
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const api = p => fetch(p, {headers:{"Accept":"application/json"}});
+const apiPost = (p, body) => fetch(p, {
+  method:"POST", headers:{"Content-Type":"application/json","Accept":"application/json"},
+  body: JSON.stringify(body)
+});
+async function renderJSON(resp){
+  const text = await resp.text();
+  let data = null;
+  try { data = JSON.parse(text); } catch(e){}
+  if (!resp.ok) throw new Error((data && (data.detail || data.error)) || text.slice(0,200) || ("HTTP "+resp.status));
+  return data;
+}
+// seeded RNG (mulberry32)
+function mulberry32(seed){
+  let a = seed >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function gauss(rng, mu, sigma){
+  // Box–Muller
+  let u = 0, v = 0;
+  while(u===0) u = rng();
+  while(v===0) v = rng();
+  return mu + sigma * Math.sqrt(-2*Math.log(u)) * Math.cos(2*Math.PI*v);
+}
+function fmt(x, digits=2){ if(x===null||x===undefined) return "-"; const n = Number(x); if(!isFinite(n)) return String(x); return n.toLocaleString("en-US",{maximumFractionDigits:digits, minimumFractionDigits:digits}); }
+function fmtPct(x, digits=2){ return fmt(Number(x)*100, digits)+"%"; }
+
+/* ======================= 顶栏：健康检查 ======================= */
+const brand = $("#brand"), statusEl = $("#status");
+async function pingHealth(){
+  try{
+    const d = await renderJSON(await api("/healthz"));
+    brand.classList.add("ok"); brand.classList.remove("bad");
+    statusEl.textContent = "后端 API: 正常 · "+ new Date(d.ts*1000).toLocaleString();
+  }catch(e){
+    brand.classList.add("bad"); brand.classList.remove("ok");
+    statusEl.textContent = "后端 API: 异常 ("+ e.message +")";
+  }
+}
+pingHealth(); setInterval(pingHealth, 10000);
+
+/* ======================= Tabs ======================= */
+$$(".tab").forEach(tab => tab.addEventListener("click", ()=>{
+  $$(".tab").forEach(t=>t.classList.remove("active"));
+  tab.classList.add("active");
+  $$(".tab-panel").forEach(p=>p.style.display="none");
+  $("#tab-"+tab.dataset.tab).style.display = "";
+}));
+
+/* ======================= ① 画像 ======================= */
+let Q_CACHE = null;
+async function loadQuestions(){
+  try{
+    const d = await renderJSON(await api("/api/v1/questionnaire"));
+    Q_CACHE = d;
+    const wrap = $("#profileQuestions");
+    wrap.innerHTML = d.questions.map((q, i)=>{
+      return `<div class="qitem" data-i="${i}">
+        <div class="t"><b>Q${i+1}.</b> ${q.text} <span class="chip">权重 ${q.weight}</span></div>
+        <div class="op">
+          ${[1,2,3,4,5].map(v=>`<button type="button" data-v="${v}">${v}</button>`).join("")}
+        </div>
+      </div>`;
+    }).join("");
+    wrap.querySelectorAll(".qitem").forEach(el=>{
+      const btns = el.querySelectorAll(".op button");
+      btns.forEach(b=>b.addEventListener("click", ()=>{
+        btns.forEach(x=>x.classList.remove("picked"));
+        b.classList.add("picked");
+      }));
+    });
+  }catch(e){
+    $("#profileQuestions").innerHTML = `<pre class="err">问卷加载失败: ${e.message}</pre>`;
+  }
+}
+function pickAnswersBySeed(seed){
+  const rng = mulberry32(Number(seed||0) >>> 0);
+  $$("#profileQuestions .qitem").forEach(el=>{
+    const v = 1 + Math.floor(rng()*5);
+    const btns = el.querySelectorAll(".op button");
+    btns.forEach(b=>b.classList.toggle("picked", Number(b.dataset.v)===v));
+  });
+}
+function getAnswers(){
+  const out = [];
+  const fail = [];
+  $$("#profileQuestions .qitem").forEach((el, i)=>{
+    const p = el.querySelector(".op button.picked");
+    if(!p) fail.push(i+1);
+    else out.push(Number(p.dataset.v));
+  });
+  if(fail.length) throw new Error("请先完成第 "+fail.join(", ")+" 题（或先用 seed 生成）");
+  return out;
+}
+function renderProfile(d){
+  $("#profileResultPanel").style.display="";
+  const mix = Object.entries(d.suggest_asset_mix||{});
+  const c = d.freqtrade_constraints || {};
+  $("#profileResult").innerHTML = `
+    <div class="kv">
+      <div><div class="k">Risk Score (0-10)</div><div class="v">${fmt(d.risk_score,2)}</div></div>
+      <div><div class="k">风险等级</div><div class="v" style="color:var(--primary)">R${d.risk_level}</div></div>
+      <div><div class="k">投资期限</div><div class="v">${d.horizon}</div></div>
+      <div><div class="k">财务目标</div><div class="v">${d.financial_goal}</div></div>
+      <div><div class="k">最大容忍回撤</div><div class="v" style="color:var(--err)">${fmtPct(d.max_drawdown_tolerance)}</div></div>
+      <div><div class="k">建议最大杠杆</div><div class="v">${fmt(d.max_leverage,2)}x</div></div>
+    </div>
+    <h3 style="font-size:13px;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.3px">建议资产混合</h3>
+    <div class="mix-bars">
+      ${mix.map(([k,v])=>`
+        <div class="r"><div>${k}</div><div class="bar"><div style="width:${Math.min(100,Math.max(0,Number(v)*100)).toFixed(1)}%"></div></div><div>${fmtPct(v)}</div></div>
+      `).join("")}
+    </div>
+    <h3 style="font-size:13px;color:var(--muted);margin:18px 0 8px;text-transform:uppercase;letter-spacing:.3px">Freqtrade 硬约束</h3>
+    <div class="kv">
+      <div><div class="k">max_open_trades</div><div class="v">${c.max_open_trades ?? "-"}</div></div>
+      <div><div class="k">stake_amount (USDT)</div><div class="v">${fmt(c.stake_amount ?? NaN,0)}</div></div>
+      <div><div class="k">stoploss</div><div class="v" style="color:var(--err)">${fmtPct(c.stoploss ?? NaN)}</div></div>
+      <div><div class="k">trading_mode / leverage</div><div class="v">${c.trading_mode ?? "-"} · ${fmt(c.leverage ?? NaN,2)}x</div></div>
+    </div>
+  `;
+}
+$("#profileSeedBtn").addEventListener("click", ()=>{
+  pickAnswersBySeed(Number($("#profileSeed").value||0));
+});
+$("#profileRunBtn").addEventListener("click", async ()=>{
+  const btn = $("#profileRunBtn"); btn.disabled = true;
+  try{
+    const answers = getAnswers();
+    const req = {
+      answers,
+      investment_horizon: $("#profileHorizon").value,
+      financial_goal: $("#profileGoal").value,
+      seed: Number($("#profileSeed").value||0) || null
+    };
+    const d = await renderJSON(await apiPost("/api/v1/profile/evaluate", req));
+    renderProfile(d);
+    document.getElementById("tab-profile").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#profileResultPanel").style.display="";
+    $("#profileResult").innerHTML = `<pre class="err">画像失败: ${e.message}</pre>`;
+  }finally{ btn.disabled = false; }
+});
+loadQuestions();
+
+/* ======================= ② 资产配置 ======================= */
+function genAllocDemo(){
+  const syms = $("#allocSymbols").value.split(",").map(s=>s.trim()).filter(Boolean);
+  const maxW = Number($("#allocMaxW").value||0.6);
+  const muBy  = {BTC:0.0012, ETH:0.0009, SOL:0.0018, USDT:0.00005, BNB:0.0008};
+  const sigBy = {BTC:0.032,  ETH:0.036,  SOL:0.055,  USDT:0.001,   BNB:0.028};
+  const seed = Math.floor((Math.abs(Date.now()) & 0x7FFFFFFF) % 100000);
+  const rng = mulberry32(seed);
+  const returns_pct = {};
+  syms.forEach(s=>{
+    const mu  = muBy[s]  ?? 0.001;
+    const sig = sigBy[s] ?? 0.03;
+    const arr = [];
+    for(let i=0;i<252;i++) arr.push(gauss(rng, mu, sig));
+    returns_pct[s] = arr;
+  });
+  const model = $("#allocModel").value;
+  const base = { symbols: syms, returns_pct, max_weight: maxW, min_weight: 0 };
+  if(model === "markowitz"){
+    base.objective = "max_sharpe";
+    base.risk_free_rate = 0.04;
+    base.group_constraints = [{assets:syms.filter(s=>s!=="USDT"), min:0.20, max:0.90}];
+  }else{
+    base.group_constraints = [{assets:syms.filter(s=>s!=="USDT"), min:0.20, max:0.80}];
+  }
+  $("#allocJson").value = JSON.stringify(base, null, 2);
+}
+$("#allocGenBtn").addEventListener("click", genAllocDemo);
+$("#allocRunBtn").addEventListener("click", async ()=>{
+  const btn = $("#allocRunBtn"); btn.disabled = true;
+  try{
+    let payload;
+    try{ payload = JSON.parse($("#allocJson").value); }
+    catch(e){ throw new Error("JSON 解析失败: "+e.message); }
+    const model = $("#allocModel").value;
+    const endpoint = model === "risk_parity"
+      ? "/api/v1/allocate/risk_parity"
+      : "/api/v1/allocate/markowitz";
+    const d = await renderJSON(await apiPost(endpoint, payload));
+    $("#allocResultPanel").style.display = "";
+    $("#allocSummary").innerHTML = `
+      <div class="kv">
+        <div><div class="k">模型</div><div class="v" style="color:var(--primary)">${d.model}</div></div>
+        <div><div class="k">年化收益 E[r]</div><div class="v">${fmtPct(d.expected_return)}</div></div>
+        <div><div class="k">年化波动 σ</div><div class="v">${fmtPct(d.volatility)}</div></div>
+        <div><div class="k">夏普 (rf=4%)</div><div class="v">${fmt(d.sharpe,2)}</div></div>
+        <div><div class="k">分散化比率</div><div class="v">${fmt(d.diversify_ratio,2)}</div></div>
+        <div><div class="k">换手 turnover</div><div class="v">${fmtPct(d.turnover)}</div></div>
+      </div>
+    `;
+    const ws = Object.entries(d.weights || {}).sort((a,b)=>b[1]-a[1]);
+    $("#allocWeights").innerHTML = ws.map(([k,v])=>`
+      <div class="r"><div>${k}</div><div class="bar"><div style="width:${(Math.max(0,Number(v))*100).toFixed(1)}%"></div></div><div>${fmtPct(v)}</div></div>
+    `).join("") + `<div style="margin-top:12px;color:var(--muted);font-size:12px">风险贡献（绝对值）：` +
+      Object.entries(d.risk_contributions||{}).map(([k,v])=>`<span class="chip" style="margin:2px">${k}=${fmt(v,4)}</span>`).join(" ") + `</div>`;
+    $("#tab-allocate").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#allocResultPanel").style.display = "";
+    $("#allocSummary").innerHTML = `<pre class="err">资产配置失败: ${e.message}</pre>`;
+    $("#allocWeights").innerHTML = "";
+  }finally{ btn.disabled = false; }
+});
+// 初始化一份
+genAllocDemo();
+
+/* ======================= ③ 再平衡 ======================= */
+$("#rebRunBtn").addEventListener("click", async ()=>{
+  const btn = $("#rebRunBtn"); btn.disabled = true;
+  try{
+    let payload;
+    try{ payload = JSON.parse($("#rebJson").value); }
+    catch(e){ throw new Error("JSON 解析失败: "+e.message); }
+    const d = await renderJSON(await apiPost("/api/v1/rebalance/check", payload));
+    $("#rebResultPanel").style.display = "";
+    const statusChip = d.triggered
+      ? `<span class="chip sell">需要再平衡</span>`
+      : `<span class="chip buy">无需再平衡</span>`;
+    $("#rebTop").innerHTML = `
+      ${statusChip}
+      <div class="kv" style="margin-top:10px">
+        <div><div class="k">单资产最大偏离</div><div class="v" style="color:var(--warn)">${fmtPct(d.individual_max_deviation)}</div></div>
+        <div><div class="k">组合整体偏离</div><div class="v" style="color:var(--warn)">${fmtPct(d.portfolio_deviation)}</div></div>
+        <div><div class="k">距上次再平衡</div><div class="v">${d.days_since_last_rebalance} 天</div></div>
+        <div><div class="k">成本 vs 预期收益 (USDT)</div><div class="v">$${fmt(d.estimated_cost_usdt,0)} / $${fmt(d.estimated_gain_usdt,0)}</div></div>
+      </div>
+      <h3 style="margin-top:14px;font-size:14px;color:var(--muted)">触发原因</h3>
+      <ul class="reasons">${(d.reasons||[]).map(r=>`<li>${r}</li>`).join("") || "<li>未触发</li>"}</ul>
+    `;
+    const rows = (d.orders||[]).map(o=>`
+      <tr>
+        <td>${o.symbol}</td>
+        <td><span class="chip ${o.side==='BUY'?'buy':(o.side==='SELL'?'sell':'warn')}">${o.side}</span></td>
+        <td style="font-family:var(--mono)">${fmt(o.weight_delta*100,2)}%（${fmtPct(o.current_weight)} → ${fmtPct(o.target_weight)}）</td>
+        <td style="font-family:var(--mono)">$${fmt(o.notional_usdt,0)}</td>
+        <td style="font-family:var(--mono)">${fmt(o.base_qty,6)}</td>
+        <td><span class="chip">${o.reason||""}</span></td>
+      </tr>`).join("");
+    $("#rebOrders").innerHTML = rows
+      ? `<table><thead><tr><th>品种</th><th>方向</th><th>权重变化</th><th>名义金额 (USDT)</th><th>数量 (base)</th><th>原因</th></tr></thead><tbody>${rows}</tbody></table>`
+      : `<div style="color:var(--muted)">当前无订单</div>`;
+    $("#tab-rebalance").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#rebResultPanel").style.display = "";
+    $("#rebTop").innerHTML = `<pre class="err">再平衡检测失败: ${e.message}</pre>`;
+    $("#rebOrders").innerHTML = "";
+  }finally{ btn.disabled = false; }
+});
+
+/* ======================= ④ 报告（简易 Markdown 渲染） ======================= */
+function mdToHtml(md){
+  // 分行，保留表格/代码块边界
+  const lines = String(md||"").split(/\r?\n/);
+  const out = [];
+  let inUl=false, inOl=false, pBuf=[], closeP=()=>{if(pBuf.length){out.push("<p>"+pBuf.join("<br/>")+"</p>"); pBuf=[];}};
+  for(let i=0;i<lines.length;i++){
+    let L = lines[i];
+    // heading
+    const h = L.match(/^(#{1,6})\s+(.*)$/);
+    if(h){ closeP(); if(inUl){out.push("</ul>");inUl=false;} if(inOl){out.push("</ol>");inOl=false;}
+      const lv = h[1].length; out.push(`<h${lv}>${inline(h[2])}</h${lv}>`); continue; }
+    // table: header + |--| + data rows
+    if(/^\s*\|.*\|\s*$/.test(L) && i+1 < lines.length && /^\s*\|?\s*:?-{2,}/.test(lines[i+1])){
+      closeP(); if(inUl){out.push("</ul>");inUl=false;} if(inOl){out.push("</ol>");inOl=false;}
+      const header = parseRow(L);
+      i += 2; // skip separator
+      const body = [];
+      while(i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])){ body.push(parseRow(lines[i])); i++; }
+      i--;
+      out.push("<table><thead><tr>"+header.map(c=>`<th>${inline(c)}</th>`).join("")+"</tr></thead>");
+      if(body.length){
+        out.push("<tbody>"+body.map(r=>"<tr>"+r.map(c=>`<td>${inline(c)}</td>`).join("")+"</tr>").join("")+"</tbody>");
+      }
+      out.push("</table>"); continue;
+    }
+    // ul
+    if(/^\s*[-*+]\s+/.test(L)){
+      closeP(); if(!inUl){ out.push("<ul>"); inUl=true; } if(inOl){out.push("</ol>");inOl=false;}
+      out.push("<li>"+inline(L.replace(/^\s*[-*+]\s+/,""))+"</li>"); continue;
+    }
+    // ol
+    if(/^\s*\d+\.\s+/.test(L)){
+      closeP(); if(!inOl){ out.push("<ol>"); inOl=true; } if(inUl){out.push("</ul>");inUl=false;}
+      out.push("<li>"+inline(L.replace(/^\s*\d+\.\s+/,""))+"</li>"); continue;
+    }
+    if(L.trim()===""){ closeP(); if(inUl){out.push("</ul>");inUl=false;} if(inOl){out.push("</ol>");inOl=false;} continue; }
+    // plain paragraph line
+    pBuf.push(L);
+  }
+  closeP(); if(inUl){out.push("</ul>");} if(inOl){out.push("</ol>");}
+  return out.join("\n");
+}
+function parseRow(line){
+  let s = line.trim();
+  if(s.startsWith("|")) s = s.slice(1);
+  if(s.endsWith("|")) s = s.slice(0,-1);
+  return s.split("|").map(c=>c.trim());
+}
+function inline(t){
+  return String(t)
+    .replace(/`([^`]+)`/g, (_,c)=>`<code>${c}</code>`)
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\*([^*]+)\*/g, "<i>$1</i>")
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, `<a href="$2" target="_blank" rel="noreferrer">$1</a>`);
+}
+
+$("#repRunBtn").addEventListener("click", async ()=>{
+  const btn = $("#repRunBtn"); btn.disabled = true;
+  try{
+    const seed = Number($("#repSeed").value||3);
+    const rf   = Number($("#repRf").value||0.04);
+    const rng = mulberry32(seed >>> 0);
+    const eq = {};
+    let p = 100000;
+    const d0 = new Date("2024-01-01");
+    const N = 250;
+    for(let i=0;i<N;i++){
+      const dt = new Date(d0.getTime() + i*86400000);
+      const r = gauss(rng, 0.0005, 0.015);
+      p = p * (1 + r);
+      eq[dt.toISOString().slice(0,10)] = p;
+    }
+    const d = await renderJSON(await apiPost("/api/v1/report/summarize", {
+      equity: eq, risk_free_rate: rf, output_format: "markdown"
+    }));
+    $("#repResultPanel").style.display="";
+    $("#repContent").innerHTML = mdToHtml(d.content || "");
+    $("#tab-report").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#repResultPanel").style.display="";
+    $("#repContent").innerHTML = `<pre class="err">报告生成失败: ${e.message}</pre>`;
+  }finally{ btn.disabled = false; }
+});
+</script>
+</body>
+</html>
