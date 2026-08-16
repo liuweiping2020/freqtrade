@@ -315,7 +315,7 @@ def create_app() -> FastAPI:
             close = np.asarray(req.prices_by_symbol[s], dtype=float)
             if len(close) < 20:
                 raise HTTPException(400, detail=f"{s} 价格点不足 20 个")
-            dates = pd.date_range(end=pd.Timestamp.utcnow().normalize(), periods=len(close), freq="D")
+            dates = pd.date_range(end=pd.Timestamp.now("UTC").normalize(), periods=len(close), freq="D")
             # 用 close 近似合成 OHLCV（避免调用端必须给全）
             rng = np.random.default_rng(abs(hash(s)) & 0xFFFFFFFF)
             noise = np.abs(rng.normal(0, 0.003, size=len(close)))
@@ -330,7 +330,7 @@ def create_app() -> FastAPI:
         # 3) 构造 context
         ctx = ResearchContext(
             symbols=req.symbols,
-            date=pd.Timestamp.utcnow().normalize(),
+            date=pd.Timestamp.now("UTC").normalize(),
             market_regime=req.market_regime,
             prices=prices_dict,
             factor_scores=req.factor_scores or {},
