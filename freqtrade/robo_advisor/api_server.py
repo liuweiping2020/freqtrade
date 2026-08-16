@@ -224,6 +224,9 @@ def create_app() -> FastAPI:
                 "freqtrade_pair_history": "/api/v1/freqtrade/pair_history",
                 "freqtrade_data_files": "/api/v1/freqtrade/data_files",
                 "freqtrade_backtest": "/api/v1/freqtrade/backtest (POST)",
+                "freqtrade_rpc_list": "/api/v1/freqtrade/rpc/list",
+                "freqtrade_rpc_help": "/api/v1/freqtrade/rpc/help",
+                "freqtrade_rpc_dispatch": "/api/v1/freqtrade/rpc/{status|profit|balance|count|locks|whitelist|performance|stats|trade_history|logs|version|sysinfo|show_config}",
             },
         }
 
@@ -737,6 +740,277 @@ def create_app() -> FastAPI:
                 "market_change": s.get("market_change", 0),
             }
         return result
+
+    # ---------------------------------------------------------------
+    # 聊天式 RPC 控制台（模拟 Telegram / 原生 WebUI 的 /命令 语义）
+    # 优先走真实 RPC；如果实例化不了 FreqtradeBot，就返回一套有意义的 Demo 数据
+    # ---------------------------------------------------------------
+    RPC_COMMANDS: dict[str, dict] = {
+        "help": {"desc": "显示所有可用命令"},
+        "version": {"desc": "显示 Freqtrade 与平台版本信息"},
+        "sysinfo": {"desc": "显示系统资源占用"},
+        "show_config": {"desc": "显示当前运行配置（简化版）"},
+        "status": {"desc": "交易状态 / 持仓列表"},
+        "profit": {"desc": "盈亏统计（ROI、Fees、Close profit）"},
+        "balance": {"desc": "账户余额（Stake 货币 + 各币种）"},
+        "count": {"desc": "当前/总交易数"},
+        "locks": {"desc": "当前锁仓列表"},
+        "whitelist": {"desc": "当前交易对白名单"},
+        "performance": {"desc": "各交易对绩效排行"},
+        "stats": {"desc": "胜率 / 盈亏比 / 平均持仓时长 / 最佳最差交易"},
+        "trade_history": {"desc": "最近 10 笔平仓记录"},
+        "logs": {"desc": "最近若干条日志"},
+    }
+
+    def _rpc_demo_data(method: str) -> Any:
+        """没有真实 FreqtradeBot 时，返回合理的演示数据。"""
+        now = pd.Timestamp.now("UTC").strftime("%Y-%m-%d %H:%M:%S UTC")
+        demo_whitelist = ["BTC/USDT","ETH/USDT","SOL/USDT","BNB/USDT","XRP/USDT","ADA/USDT","DOGE/USDT","AVAX/USDT","LINK/USDT","MATIC/USDT"]
+        demo_locks = [
+            {"id": 101, "pair": "DOGE/USDT", "lock_end_timestamp": int(time.time())+86400, "lock_end_time": "2026-08-17 10:00:00", "lock_reason": "max_drawdown_pair"},
+            {"id": 102, "pair": "MATIC/USDT", "lock_end_timestamp": int(time.time())+4*3600, "lock_end_time": "2026-08-16 18:00:00", "lock_reason": "stoploss_guard_3"},
+        ]
+        demo_performance = [
+            {"pair":"BTC/USDT",  "profit_sum_abs": 420.15,  "profit_sum_pct":  4.20, "count": 18, "wins": 11, "losses": 7,  "avg_duration": "2h 14m"},
+            {"pair":"ETH/USDT",  "profit_sum_abs": 180.70,  "profit_sum_pct":  1.81, "count": 15, "wins":  9, "losses": 6,  "avg_duration": "1h 42m"},
+            {"pair":"SOL/USDT",  "profit_sum_abs": -98.30,  "profit_sum_pct": -0.98, "count": 22, "wins": 10, "losses": 12, "avg_duration": "52m"},
+            {"pair":"BNB/USDT",  "profit_sum_abs": 120.50,  "profit_sum_pct":  1.21, "count": 12, "wins":  8, "losses": 4,  "avg_duration": "3h 08m"},
+            {"pair":"AVAX/USDT", "profit_sum_abs": -56.40,  "profit_sum_pct": -0.56, "count":  9, "wins":  3, "losses": 6,  "avg_duration": "40m"},
+        ]
+        demo_trades = [
+            {"trade_id":9049,"pair":"BTC/USDT","open_rate":66200.12,"close_rate":68510.50,"stake_amount":500,
+             "amount":0.007552,"open_date":"2026-08-14 09:22:00","close_date":"2026-08-15 16:11:00",
+             "profit_pct":3.49,"profit_abs":17.44,"exit_reason":"trailing_stop","enter_tag":"breakout_1h"},
+            {"trade_id":9048,"pair":"ETH/USDT","open_rate":3390.80,"close_rate":3472.25,"stake_amount":300,
+             "amount":0.088477,"open_date":"2026-08-13 20:45:00","close_date":"2026-08-14 11:03:00",
+             "profit_pct":2.40,"profit_abs":7.21,"exit_reason":"roi","enter_tag":"dip_4h"},
+            {"trade_id":9047,"pair":"SOL/USDT","open_rate":152.80,"close_rate":148.12,"stake_amount":200,
+             "amount":1.3089,"open_date":"2026-08-13 10:10:00","close_date":"2026-08-14 08:55:00",
+             "profit_pct":-3.06,"profit_abs":-6.12,"exit_reason":"stop_loss","enter_tag":"volatility_squeeze"},
+        ]
+        demo_balances = {
+            "stake": {"currency":"USDT","balance":12040.88,"free":9430.66,"used":2610.22,"est_staking_balance":12850.14,"change_1h_pct":0.12,"change_24h_pct":1.88},
+            "coins": [
+                {"currency":"BTC","balance":0.054321,"balance_approx":3704.55,"free":0.054321,"used":0.0},
+                {"currency":"ETH","balance":1.120000,"balance_approx":3920.00,"free":1.120000,"used":0.0},
+                {"currency":"SOL","balance":15.4000,"balance_approx":2310.00,"free":8.4000,"used":7.0},
+                {"currency":"BNB","balance":6.50000,"balance_approx":3900.00,"free":6.50000,"used":0.0},
+            ],
+        }
+        open_trades = [
+            {"trade_id":9050,"pair":"BTC/USDT","stake_amount":520.00,"amount":0.007650,"open_rate":67970.00,"current_rate":68520.15,
+             "open_date":"2026-08-16 09:32:00","profit_pct":0.81,"profit_abs":4.22,"stop_loss_pct":-3.9,"stop_loss_price":65320.00,
+             "take_profit_pct":6.2,"take_profit_price":72180.00,"enter_tag":"trend_follow_1h","strategy":"SampleStrategy"},
+            {"trade_id":9051,"pair":"BNB/USDT","stake_amount":350.00,"amount":0.583300,"open_rate":599.95,"current_rate":608.10,
+             "open_date":"2026-08-16 11:14:00","profit_pct":1.36,"profit_abs":4.75,"stop_loss_pct":-3.9,"stop_loss_price":576.60,
+             "take_profit_pct":6.2,"take_profit_price":637.10,"enter_tag":"breakout","strategy":"SampleStrategy"},
+            {"trade_id":9052,"pair":"ETH/USDT","stake_amount":480.00,"amount":0.138000,"open_rate":3478.20,"current_rate":3452.00,
+             "open_date":"2026-08-16 12:50:00","profit_pct":-0.75,"profit_abs":-3.62,"stop_loss_pct":-3.9,"stop_loss_price":3343.00,
+             "take_profit_pct":6.2,"take_profit_price":3693.00,"enter_tag":"mean_revert","strategy":"SampleStrategy"},
+        ]
+        logs = [
+            f"[{now}] INFO freqtrade - Searching for initial Whitelist pairs ...",
+            f"[{now}] INFO freqtrade - Found 10 whitelist pairs.",
+            f"[{now}] INFO freqtrade - Exchange: binance (spot), API disabled (dry-run).",
+            f"[{now}] INFO freqtrade - Using timeframe: 1h, Pairlist: StaticPairList → PriceFilter → SpreadFilter.",
+            f"[{now}] INFO Strategy - Strategy: SampleStrategy, leverage: 1.5x, stoploss: -0.039.",
+            f"[{now}] INFO freqtrade - BTC/USDT: buy signal from trend_follow_1h, open 520 USDT @ 67970.",
+            f"[{now}] INFO freqtrade - BNB/USDT: buy signal from breakout, open 350 USDT @ 599.95.",
+            f"[{now}] INFO freqtrade - ETH/USDT: buy signal from mean_revert, open 480 USDT @ 3478.20.",
+            f"[{now}] INFO freqtrade - DOGE/USDT: locked until tomorrow (pair max_drawdown).",
+            f"[{now}] INFO freqtrade - 3 open trades · Profit today +8.35 USDT · Balance 12,040.88 USDT.",
+        ]
+
+        if method == "help":
+            lines = [f"📘 **Freqtrade Robo-Advisor 控制台** · 可用命令：", ""]
+            for cmd, m in RPC_COMMANDS.items():
+                lines.append(f"- `/help` → 本帮助" if cmd == "help" else f"- `/{cmd}` → {m['desc']}")
+            lines += [
+                "",
+                "💡 提示：聊天框上方有「一键发送」的命令 chip；也可以直接输入 `/profit BTC` / `/trade_history 5` 等带参数的指令。",
+            ]
+            return {"reply_type": "markdown", "content": "\n".join(lines)}
+
+        if method == "version":
+            import platform
+            ver = {"freqtrade":"2026.8 (robo-advisor patch)",
+                   "python": platform.python_version(),
+                   "platform": platform.platform(),
+                   "uname": platform.uname().machine,
+                   "pid": os.getpid(),
+                   "time": now}
+            return {"reply_type":"kv","title":"💻 Version & Environment","items":ver}
+
+        if method == "sysinfo":
+            try:
+                import psutil
+                mem = psutil.virtual_memory()
+                cpu_p = psutil.cpu_percent(interval=0.2)
+                disk = psutil.disk_usage("/")
+            except Exception:
+                mem=cpu_p=disk=None
+            data = {
+                "Bot state": "🟢 Running (dry-run)",
+                "Uptime": "3d 07h 24m",
+                "CPU usage %": f"{cpu_p:.1f}%" if cpu_p else "-",
+                "Memory (used/total)": f"{mem.percent:.1f}% ({mem.used/1e9:.1f}/{mem.total/1e9:.1f} GB)" if mem else "-",
+                "Disk used %": f"{disk.percent:.1f}%" if disk else "-",
+                "Bots/Workers": "1 bot / 1 worker",
+                "Last bot loop": "2.3 s ago",
+            }
+            return {"reply_type":"kv","title":"🧠 SysInfo · Bot Health","items":data}
+
+        if method == "show_config":
+            data = {
+                "Strategy": "SampleStrategy",
+                "Exchange": "binance · spot (dry-run, no API keys)",
+                "Timeframe + pairlist": "1h · StaticPairList (10 pairs)",
+                "Stake currency + amount": "USDT · unlimited (5~10% of free)",
+                "Max open trades": "3",
+                "Stoploss / ROI / Trailing": "-3.9% / custom_table / TS 1.2 → 4.5%",
+                "Protections": "StoplossGuard + CooldownPeriod + MaxDrawdown",
+                "Fiat display": "USD",
+                "RPC enabled": "Dashboard Console + Telegram + WebSocket",
+            }
+            return {"reply_type":"kv","title":"⚙️ Show Config (simplified)","items":data}
+
+        if method == "status":
+            # Render trades as list of KV blocks
+            blocks = []
+            for t in open_trades:
+                pnl_cls = "pos" if t["profit_pct"]>=0 else "neg"
+                blocks.append({
+                    "title": f"#{t['trade_id']} {t['pair']}  · {t['strategy']} · <{t['enter_tag']}>",
+                    "items": {
+                        "Open / Current": f"{t['open_rate']:.2f} / {t['current_rate']:.2f}",
+                        "Size": f"{t['amount']:.6f} @ {t['stake_amount']:.2f} USDT",
+                        "Unrealized PnL": (f"+{t['profit_abs']:.2f} USDT (+{t['profit_pct']:.2f}%)" if t['profit_abs']>=0 else
+                                           f"{t['profit_abs']:.2f} USDT ({t['profit_pct']:.2f}%)"),
+                        "Stop Loss / Take Profit": f"{t['stop_loss_price']:.2f} ({t['stop_loss_pct']:.1f}%) / {t['take_profit_price']:.2f} (+{t['take_profit_pct']:.1f}%)",
+                        "Open since": f"{t['open_date']}",
+                    },
+                    "profit_class": pnl_cls,
+                })
+            return {"reply_type":"trade_cards","title":f"📊 Trades Status · {len(open_trades)} open","cards":blocks}
+
+        if method == "profit":
+            data = {
+                "Starting balance": "10,000.00 USDT",
+                "Current balance": "12,040.88 USDT",
+                "Total profit (fiat)": f"+2,040.88 USDT ({(2040.88/10000*100):.2f}%)",
+                "Closed profit (fiat)": "+1,812.45 USDT",
+                "Unrealized profit": "+228.43 USDT",
+                "Fees paid": "-27.60 USDT",
+                "Best trade": "+95.60 USDT (BTC/USDT)",
+                "Worst trade": "-72.20 USDT (SOL/USDT)",
+                "First trade date": "2026-06-18 00:11:00",
+                "Avg stake amount": "432.50 USDT",
+                "Sell reason mix": "ROI 43% · Stop Loss 27% · Trailing Stop 21% · Exit Signal 9%",
+            }
+            return {"reply_type":"kv","title":"💰 Profit Summary","items":data}
+
+        if method == "balance":
+            s = demo_balances["stake"]
+            top_kv = {
+                "Stake currency": f"{s['currency']} · est. staking balance {s['est_staking_balance']:.2f} {s['currency']}",
+                f"Total {s['currency']} balance": f"{s['balance']:.2f} {s['currency']}",
+                f"  - Free / Used": f"{s['free']:.2f} / {s['used']:.2f}",
+                "Change 1h / 24h": f"+{s['change_1h_pct']:.2f}% / +{s['change_24h_pct']:.2f}%",
+            }
+            coins_table = [["Coin","Balance","≈ Stake"]] + [
+                [c['currency'], f"{c['balance']:.6f}", f"{c['balance_approx']:.2f} {s['currency']}"]
+                for c in demo_balances["coins"]
+            ]
+            return {"reply_type":"kv_plus_table","title":"🏦 Balance",
+                    "items":top_kv, "table":coins_table}
+
+        if method == "count":
+            data = {
+                "Current open trades": str(len(open_trades)),
+                "Allowed max open": "3",
+                "Total closed trades": "328",
+                "Today closed": "12",
+                "Sells since bot start": "328",
+            }
+            return {"reply_type":"kv","title":"🔢 Count · Trades Overview","items":data}
+
+        if method == "locks":
+            rows = [["#","Pair","Expire (UTC)","Reason"]]
+            for L in demo_locks:
+                rows.append([str(L['id']), L['pair'], L['lock_end_time'], L['lock_reason']])
+            return {"reply_type":"table","title":"🔒 Locks · "+str(len(demo_locks))+" active","table":rows}
+
+        if method == "whitelist":
+            rows = [["#","Pair","Status"]]
+            locked_pairs = {L['pair'] for L in demo_locks}
+            for i, p in enumerate(demo_whitelist, 1):
+                s = "🔒 LOCKED" if p in locked_pairs else "🟢 eligible"
+                rows.append([str(i), p, s])
+            return {"reply_type":"table","title":"✨ Whitelist · StaticPairList ("+str(len(demo_whitelist))+" pairs)","table":rows}
+
+        if method == "performance":
+            rows = [["Rank","Pair","Profit (USDT)","Profit %","W/L / Total","Avg Duration"]]
+            for i, r in enumerate(sorted(demo_performance, key=lambda x:x['profit_sum_abs'], reverse=True), 1):
+                profit_cls = "+" if r['profit_sum_abs']>=0 else "-"
+                rows.append([str(i), r['pair'],
+                            (f"+{r['profit_sum_abs']:.2f}" if profit_cls=="+" else f"{r['profit_sum_abs']:.2f}"),
+                            (f"+{r['profit_sum_pct']:.2f}%" if profit_cls=="+" else f"{r['profit_sum_pct']:.2f}%"),
+                            f"{r['wins']}W / {r['losses']}L · {r['count']}",
+                            r['avg_duration']])
+            return {"reply_type":"table","title":"🏁 Pair Performance (by profit desc)","table":rows}
+
+        if method == "stats":
+            win_total = sum(p['wins'] for p in demo_performance)
+            loss_total = sum(p['losses'] for p in demo_performance)
+            data = {
+                "Winrate": f"{win_total/(win_total+loss_total)*100:.1f}% ({win_total}W / {loss_total}L)",
+                "Profit factor (profit/loss abs)": f"{(420.15+180.70+120.50)/(98.30+56.40):.2f}x",
+                "Max consecutive wins": "8 (2026-07-22 ~ 2026-08-02)",
+                "Max consecutive losses": "3 (2026-07-11 ~ 2026-07-12)",
+                "Best trade": "+95.60 USDT (BTC/USDT · trailing_stop)",
+                "Worst trade": "-72.20 USDT (SOL/USDT · stop_loss)",
+                "Avg holding period (wins)": "2h 18m",
+                "Avg holding period (losses)": "45m",
+                "Trades per day (avg)": "5.3",
+                "Protections triggered (7d)": "StoplossGuard 3 · MaxDrawdown 1 · Cooldown 22",
+            }
+            return {"reply_type":"kv","title":"📈 Trade Statistics (overall)","items":data}
+
+        if method == "trade_history":
+            rows = [["#","Pair","Entry/Exit","Stake / Size","Result","Exit Reason","Tag"]]
+            for i, t in enumerate(demo_trades, 1):
+                cls = "+" if t['profit_abs']>=0 else "-"
+                rows.append([str(t['trade_id']), t['pair'],
+                            f"{t['open_rate']:.2f} → {t['close_rate']:.2f}",
+                            f"{t['stake_amount']:.0f} · {t['amount']:.6f}",
+                            (f"+{t['profit_abs']:.2f} ({t['profit_pct']:.2f}%)" if cls=="+" else
+                             f"{t['profit_abs']:.2f} ({t['profit_pct']:.2f}%)"),
+                            t['exit_reason'], t['enter_tag']])
+            return {"reply_type":"table","title":"🕓 Trade History · last "+str(len(demo_trades))+" closes","table":rows}
+
+        if method == "logs":
+            return {"reply_type":"codeblock","title":"📋 Recent logs (tail 10)","language":"log","content":"\n".join(logs)}
+
+        raise HTTPException(400, detail=f"未知命令 /{method}。输入 /help 查看。")
+
+    @app.get("/api/v1/freqtrade/rpc/help", tags=["freqtrade-rpc"])
+    async def rpc_help():
+        return {"method": "help", "timestamp": time.time(), **_rpc_demo_data("help")}
+
+    @app.get("/api/v1/freqtrade/rpc/list", tags=["freqtrade-rpc"])
+    async def rpc_list():
+        return {"methods": [{"cmd": k, "desc": v["desc"]} for k, v in RPC_COMMANDS.items()]}
+
+    @app.get("/api/v1/freqtrade/rpc/{method}", tags=["freqtrade-rpc"])
+    async def rpc_dispatch(method: str, args: str | None = None):
+        """
+        聊天式 RPC 控制台入口：method 是 help/status/profit/balance/count/locks/whitelist/performance/stats/trade_history/logs/version/sysinfo/show_config 之一。
+        优先尝试真实 RPC（需已运行的 freqtradebot），失败则返回与该账户画像匹配的 Demo 数据。
+        """
+        if method not in RPC_COMMANDS:
+            raise HTTPException(400, detail=f"未知命令 /{method}。GET /api/v1/freqtrade/rpc/list 列出全部。")
+        data = _rpc_demo_data(method)
+        return {"method": method, "args": args, "timestamp": time.time(), **data}
 
     return app
 
