@@ -17,7 +17,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Literal
+from typing import Any, ClassVar, Literal
 
 import numpy as np
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -114,13 +114,14 @@ class InvestorProfile(BaseModel):
 
     @model_validator(mode="after")
     def _sync_risk_level(self) -> "InvestorProfile":
-        """risk_score ↔ risk_level 自动同步"""
-        # 基于 risk_score → R1~R5
+        """risk_score → risk_level 自动同步（避免触发 validate_assignment 递归）"""
         mapping = [(2, RiskLevel.R1), (4, RiskLevel.R2), (6, RiskLevel.R3), (8, RiskLevel.R4), (10, RiskLevel.R5)]
+        computed_level = RiskLevel.R5
         for upper, level in mapping:
             if self.risk_score <= upper:
-                self.risk_level = level
+                computed_level = level
                 break
+        object.__setattr__(self, "risk_level", computed_level)
         return self
 
     # ------------------------------------------------------------------
@@ -166,14 +167,14 @@ class InvestorProfile(BaseModel):
         defaults_lev = 1.0
 
         if override or math.isclose(self.max_drawdown_tolerance, defaults_dd, abs_tol=1e-6):
-            self.max_drawdown_tolerance = dd_map[self.risk_level] * horizon_factor[self.investment_horizon]
+            dd_val = dd_map[self.risk_level] * horizon_factor[self.investment_horizon]
+            object.__setattr__(self, "max_drawdown_tolerance", dd_val)
 
         if override or math.isclose(self.suggested_max_leverage, defaults_lev, abs_tol=1e-6):
-            self.suggested_max_leverage = round(
-                lev_map[self.risk_level] * exp_factor[self.investment_experience], 2
-            )
+            lev_val = round(lev_map[self.risk_level] * exp_factor[self.investment_experience], 2)
+            object.__setattr__(self, "suggested_max_leverage", lev_val)
 
-        self.updated_at = __import__("time").time()
+        object.__setattr__(self, "updated_at", __import__("time").time())
         return self
 
     def suggest_asset_mix(self) -> dict[str, float]:
@@ -252,8 +253,8 @@ class RiskQuestionnaire:
 
     answers: list[int] = field(default_factory=lambda: [3] * 10)
 
-    # 类属性（可被子类/外部直接访问与覆盖）
-    QUESTIONS: list[str] = [
+    # 类属性（ClassVar 告知 dataclass 不将其作为实例字段）
+    QUESTIONS: ClassVar[list[str]] = [
         # 维度：投资经验
         "Q1. 您的投资年限？(1:<1年 2:1-3年 3:3-5年 4:5-10年 5:>10年)",
         "Q2. 您主要接触过哪些投资品类？(1:存款/理财 2:基金 3:股票 4:期货/期权 5:加密资产等另类)",
@@ -271,8 +272,8 @@ class RiskQuestionnaire:
         "Q10. 您的家庭月结余率（结余/收入）？(1:<10% 2:20% 3:40% 4:60% 5:>80%)",
     ]
 
-    # 各题在综合风险分中的权重（可按业务调节，和 QUESTIONS 一一对应，和为 1.0）
-    WEIGHTS: list[float] = [
+    # 各题在综合风险分中的权重（和 QUESTIONS 一一对应，和为 1.0）
+    WEIGHTS: ClassVar[list[float]] = [
         0.10, 0.10,  # 经验
         0.12,        # 期限
         0.14, 0.12, 0.12,  # 亏损
@@ -295,6 +296,37 @@ class RiskQuestionnaire:
         """归一到 [1, 10] 的整数 risk_score"""
         rs = self.raw_score()  # 1..5
         return int(np.clip(round((rs - 1) / 4 * 9 + 1), 1, 10))
+
+    @staticmethod
+    def sample_answers(seed: int = 0, risk_profile: Literal["conservative", "balanced", "aggressive"] | None = None) -> list[int]:
+        """
+        生成一份示例问卷答案。
+
+        Parameters
+        ----------
+        seed : int
+            随机种子
+        risk_profile : str, optional
+            可选锚定的风险偏好：conservative / balanced / aggressive；
+            None 则从 seed 推断。
+        """
+        rng = np.random.default_rng(seed)
+        if risk_profile is None:
+            r = rng.random()
+            if r < 0.33:
+                risk_profile = "conservative"
+            elif r < 0.66:
+                risk_profile = "balanced"
+            else:
+                risk_profile = "aggressive"
+        mean_map = {
+            "conservative": 1.7,
+            "balanced": 3.2,
+            "aggressive": 4.4,
+        }
+        mu = mean_map[risk_profile]
+        answers = [int(np.clip(round(rng.normal(mu, 0.6)), 1, 5)) for _ in range(10)]
+        return answers
 
 
 # ---------------------------------------------------------------------------
