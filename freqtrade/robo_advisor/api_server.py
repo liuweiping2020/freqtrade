@@ -30,6 +30,7 @@ REST Endpoints 一览：
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -150,6 +151,19 @@ class ReportRequest(BaseModel):
     output_format: Literal["json", "markdown"] = "markdown"
 
 
+# --- Freqtrade 引擎
+class BacktestRequest(BaseModel):
+    strategy: str = Field(description="策略类名，如 SampleStrategy")
+    exchange: str = Field(default="binance", description="交易所名称")
+    pairs: list[str] = Field(default_factory=lambda: ["BTC/USDT"], description="回测品种列表")
+    timeframe: str = Field(default="1h", description="K线周期")
+    timerange: str = Field(default="20240101-20240601", description="回测时间范围")
+    stake_currency: str | None = None
+    stake_amount: str | None = None
+    dry_run_wallet: float | None = None
+    max_open_trades: int | None = None
+
+
 # ---------------------------------------------------------------------------
 # FastAPI App
 # ---------------------------------------------------------------------------
@@ -201,6 +215,15 @@ def create_app() -> FastAPI:
                 "nlp_report_parse": "/api/v1/nlp/report_parse (POST)",
                 "rebalance_check": "/api/v1/rebalance/check (POST)",
                 "report_summarize": "/api/v1/report/summarize (POST)",
+                "freqtrade_strategies": "/api/v1/freqtrade/strategies",
+                "freqtrade_exchanges": "/api/v1/freqtrade/exchanges",
+                "freqtrade_pairlists": "/api/v1/freqtrade/pairlists",
+                "freqtrade_freqai_models": "/api/v1/freqtrade/freqai_models",
+                "freqtrade_hyperopt_losses": "/api/v1/freqtrade/hyperopt_losses",
+                "freqtrade_protections": "/api/v1/freqtrade/protections",
+                "freqtrade_pair_history": "/api/v1/freqtrade/pair_history",
+                "freqtrade_data_files": "/api/v1/freqtrade/data_files",
+                "freqtrade_backtest": "/api/v1/freqtrade/backtest (POST)",
             },
         }
 
@@ -478,6 +501,242 @@ def create_app() -> FastAPI:
             "monthly_returns_pct": (s.monthly_returns * 100).round(2).fillna(-1).to_dict(),
         }
         return json_obj
+
+    # ================================================================
+    # Freqtrade 引擎能力
+    # ================================================================
+    WORKSPACE_ROOT = Path(__file__).resolve().parents[2]
+    FREQTRADE_PKG = Path(__file__).resolve().parents[1]
+    USER_DATA_DIR = WORKSPACE_ROOT / "user_data"
+
+    # --- 支持的交易所（硬编码 fallback，避免链式 import 失败）---
+    _SUPPORTED_EXCHANGES = [
+        "binance", "binanceus", "binanceusdm", "bingx", "bitmart", "bitget",
+        "bitpanda", "bitvavo", "bybit", "bybiteu", "coinex", "cryptocom",
+        "gate", "gateeu", "hitbtc", "htx", "hyperliquid", "idex",
+        "kraken", "krakenfutures", "kucoin", "lbank", "luno", "modetrade",
+        "myokx", "okx", "okxus",
+    ]
+
+    def _scan_py_classes(directory: Path, base_prefix: str) -> list[dict]:
+        """扫描目录下 *.py，用正则提取 class 名（不做 import，避免重依赖）。"""
+        results: list[dict] = []
+        if not directory.exists():
+            return results
+        for f in sorted(directory.glob("*.py")):
+            if f.name.startswith("__"):
+                continue
+            try:
+                text = f.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            for m in re.finditer(r"^class\s+(\w+)\s*\(([^)]+)\)\s*:", text, re.MULTILINE):
+                cls_name = m.group(1)
+                bases = m.group(2).strip()
+                # 跳过接口/基类
+                if cls_name.startswith("I") and cls_name in ("IPairList", "IHyperOptLoss", "IResolver"):
+                    continue
+                # 提取 docstring 第一行
+                doc = ""
+                doc_m = re.search(r'"""(.*?)"""', text[m.end():m.end() + 500], re.DOTALL)
+                if doc_m:
+                    doc = doc_m.group(1).strip().split("\n")[0].strip()
+                results.append({
+                    "name": cls_name,
+                    "file": f.name,
+                    "bases": bases,
+                    "doc": doc[:120],
+                })
+        return results
+
+    @app.get("/api/v1/freqtrade/strategies", tags=["freqtrade"])
+    async def ft_strategies():
+        """枚举 user_data/strategies/ 下所有策略文件。"""
+        strat_dir = USER_DATA_DIR / "strategies"
+        items: list[dict] = []
+        # 同时扫描 user_data/strategies 和 freqtrade/templates
+        for directory in [strat_dir, FREQTRADE_PKG / "templates"]:
+            if not directory.exists():
+                continue
+            for f in sorted(directory.glob("*.py")):
+                if f.name.startswith("__") or f.name == "sample_hyperopt_loss.py":
+                    continue
+                try:
+                    text = f.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                for m in re.finditer(r"^class\s+(\w+)\s*\((?:IStrategy|.*IStrategy.*)\)\s*:", text, re.MULTILINE):
+                    doc = ""
+                    doc_m = re.search(r'"""(.*?)"""', text[m.end():m.end() + 500], re.DOTALL)
+                    if doc_m:
+                        doc = doc_m.group(1).strip().split("\n")[0].strip()
+                    items.append({
+                        "name": m.group(1),
+                        "file": f.name,
+                        "path": str(f),
+                        "source": "user_data" if "user_data" in str(f) else "template",
+                        "doc": doc[:120],
+                    })
+        return {"count": len(items), "strategies": items}
+
+    @app.get("/api/v1/freqtrade/exchanges", tags=["freqtrade"])
+    async def ft_exchanges():
+        """支持的交易所列表。"""
+        # 尝试动态 import，失败则用硬编码
+        exchanges = _SUPPORTED_EXCHANGES
+        try:
+            from freqtrade.exchange.common import SUPPORTED_EXCHANGES  # type: ignore
+            exchanges = list(SUPPORTED_EXCHANGES)
+        except Exception:
+            pass
+        return {"count": len(exchanges), "exchanges": sorted(exchanges)}
+
+    @app.get("/api/v1/freqtrade/pairlists", tags=["freqtrade"])
+    async def ft_pairlists():
+        """可用的 PairList 过滤器/生成器清单。"""
+        items = _scan_py_classes(FREQTRADE_PKG / "plugins" / "pairlist", "pairlist")
+        return {"count": len(items), "pairlists": items}
+
+    @app.get("/api/v1/freqtrade/freqai_models", tags=["freqtrade"])
+    async def ft_freqai_models():
+        """可用的 FreqAI 预测模型清单。"""
+        items = _scan_py_classes(FREQTRADE_PKG / "freqai" / "prediction_models", "freqai")
+        return {"count": len(items), "models": items}
+
+    @app.get("/api/v1/freqtrade/hyperopt_losses", tags=["freqtrade"])
+    async def ft_hyperopt_losses():
+        """可用的 Hyperopt 损失函数清单。"""
+        items = _scan_py_classes(FREQTRADE_PKG / "optimize" / "hyperopt_loss", "hyperopt")
+        # 损失函数文件名带 hyperopt_loss_ 前缀，取类名更友好
+        for item in items:
+            item["short_name"] = item["name"].replace("HyperOptLoss", "").replace("HyperoptLoss", "")
+        return {"count": len(items), "losses": items}
+
+    @app.get("/api/v1/freqtrade/protections", tags=["freqtrade"])
+    async def ft_protections():
+        """可用的保护策略清单。"""
+        items = _scan_py_classes(FREQTRADE_PKG / "plugins" / "protections", "protection")
+        return {"count": len(items), "protections": items}
+
+    @app.get("/api/v1/freqtrade/pair_history", tags=["freqtrade"])
+    async def ft_pair_history(
+        pair: str = "BTC/USDT",
+        timeframe: str = "1h",
+        timerange: str | None = None,
+        candle_type: str = "spot",
+    ):
+        """加载本地历史 OHLCV 数据（从 user_data/data/ 读取）。"""
+        from freqtrade.data.history import load_pair_history
+        from freqtrade.enums.candletype import CandleType
+        from freqtrade.configuration import TimeRange
+
+        data_dir = USER_DATA_DIR / "data"
+        tr = TimeRange.parse_timerange(timerange) if timerange else None
+        try:
+            df = load_pair_history(
+                pair=pair,
+                timeframe=timeframe,
+                datadir=data_dir,
+                timerange=tr,
+                candle_type=CandleType.from_string(candle_type),
+            )
+        except Exception as e:
+            raise HTTPException(400, detail=f"加载失败: {e}")
+        if df is None or df.empty:
+            raise HTTPException(404, detail=f"未找到 {pair} {timeframe} 数据；请先下载（POST /api/v1/freqtrade/download_data）")
+        # 返回最近 500 根 + 统计
+        tail = df.tail(500)
+        return {
+            "pair": pair,
+            "timeframe": timeframe,
+            "candle_type": candle_type,
+            "total_rows": len(df),
+            "returned_rows": len(tail),
+            "first_date": str(df.index[0]) if len(df) else None,
+            "last_date": str(df.index[-1]) if len(df) else None,
+            "columns": list(df.columns),
+            "ohlcv": [
+                {
+                    "date": str(idx),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                }
+                for idx, row in tail.iterrows()
+            ],
+        }
+
+    @app.get("/api/v1/freqtrade/data_files", tags=["freqtrade"])
+    async def ft_data_files():
+        """列出 user_data/data/ 下已有的数据文件（按交易所分目录）。"""
+        data_root = USER_DATA_DIR / "data"
+        result: dict[str, list[str]] = {}
+        if not data_root.exists():
+            return {"data_dir": str(data_root), "exchanges": {}}
+        for ex_dir in sorted(data_root.iterdir()):
+            if ex_dir.is_dir():
+                files = sorted([f.name for f in ex_dir.iterdir() if f.is_file()])
+                result[ex_dir.name] = files[:50]  # 限制数量
+        return {"data_dir": str(data_root), "exchanges": result}
+
+    @app.post("/api/v1/freqtrade/backtest", tags=["freqtrade"])
+    async def ft_backtest(req: BacktestRequest):
+        """运行回测（需要本地已有历史数据）。"""
+        try:
+            from freqtrade.configuration import Configuration
+            from freqtrade.optimize.backtesting import Backtesting
+        except ImportError as e:
+            raise HTTPException(503, detail=f"Freqtrade 回测模块不可用（缺少依赖）: {e}")
+
+        # 构造最小 config
+        config = {
+            "user_data_dir": str(USER_DATA_DIR),
+            "strategy": req.strategy,
+            "timeframe": req.timeframe,
+            "timerange": req.timerange,
+            "datadir": str(USER_DATA_DIR / "data" / req.exchange),
+            "exchange": {"name": req.exchange, "key": "", "secret": "", "pair_whitelist": req.pairs, "pair_blacklist": []},
+            "stake_currency": req.stake_currency or "USDT",
+            "stake_amount": req.stake_amount or "unlimited",
+            "dry_run_wallet": req.dry_run_wallet or 1000,
+            "max_open_trades": req.max_open_trades or 3,
+            "trading_mode": "spot",
+            "margin_mode": "",
+        }
+        # 加载策略验证
+        try:
+            bt = Backtesting(config)
+            bt.start()
+        except Exception as e:
+            raise HTTPException(400, detail=f"回测失败: {e}")
+
+        # 从最后一份回测结果提取摘要
+        stats = getattr(bt, "results", None)
+        if not stats:
+            return {"status": "completed", "detail": "回测完成但未提取到统计摘要，请查看 user_data/backtest_results/"}
+
+        # 尝试提取关键指标
+        strategy_stats = stats.get("strategy", {})
+        result: dict[str, Any] = {"status": "completed", "strategies": list(strategy_stats.keys())}
+        for strat_name, s in strategy_stats.items():
+            result[strat_name] = {
+                "total_trades": s.get("total_trades", 0),
+                "profit_total": s.get("profit_total", 0),
+                "profit_total_abs": s.get("profit_total_abs", 0),
+                "max_drawdown": s.get("max_drawdown", 0),
+                "max_drawdown_abs": s.get("max_drawdown_abs", 0),
+                "sharpe": s.get("sharpe", 0),
+                "sortino": s.get("sortino", 0),
+                "calmar": s.get("calmar", 0),
+                "winrate": s.get("winrate", 0),
+                "avg_trade_duration": s.get("holding_avg", ""),
+                "best_pair": s.get("best_pair", ""),
+                "worst_pair": s.get("worst_pair", ""),
+                "market_change": s.get("market_change", 0),
+            }
+        return result
 
     return app
 

@@ -87,6 +87,14 @@
   .md table{margin:8px 0;font-size:13px}
   .md th,.md td{border:1px solid var(--line);padding:6px 10px}
   .md th{background:var(--chip)}
+  /* Freqtrade list */
+  .ft-list{max-height:340px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+  .ft-item{display:flex;align-items:flex-start;gap:8px;padding:6px 8px;border:1px solid var(--line);border-radius:8px;font-size:12px;cursor:default}
+  .ft-item:hover{background:var(--chip)}
+  .ft-item .nm{font-weight:700;font-family:var(--mono);color:var(--primary);min-width:160px;word-break:break-all}
+  .ft-item .dc{color:var(--muted);flex:1}
+  .ft-item .tg{font-size:10px;background:var(--chip);color:var(--chip-text);padding:1px 6px;border-radius:4px;white-space:nowrap}
+  .ft-count{font-size:12px;color:var(--muted);margin-bottom:8px;font-weight:600}
 </style>
 </head>
 <body>
@@ -110,6 +118,7 @@
   <div class="tab" data-tab="allocate">② 资产配置（Risk Parity / Markowitz）</div>
   <div class="tab" data-tab="rebalance">③ 组合再平衡检测 &amp; 订单</div>
   <div class="tab" data-tab="report">④ 组合绩效报告</div>
+  <div class="tab" data-tab="freqtrade">⑤ Freqtrade 引擎</div>
 </div>
 
 <!-- ======= ① 画像 ======= -->
@@ -243,6 +252,89 @@
   <div class="panel" id="repResultPanel" style="display:none">
     <h2>报告</h2>
     <div id="repContent" class="md"></div>
+  </div>
+</section>
+
+<!-- ======= ⑤ Freqtrade 引擎 ======= -->
+<section class="tab-panel" id="tab-freqtrade" style="display:none">
+  <div class="panel">
+    <h2>Freqtrade 引擎能力总览</h2>
+    <div class="hint">点击 <b>加载全部</b> 一次性拉取策略 / 交易所 / Pairlist 过滤器 / FreqAI 模型 / Hyperopt 损失函数 / 保护策略。</div>
+    <button id="ftLoadAllBtn" type="button">加载全部</button>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:14px" id="ftCards">
+    <!-- 策略 -->
+    <div class="panel">
+      <h2 style="font-size:15px">策略 Strategies</h2>
+      <div id="ftStrategies" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+    <!-- 交易所 -->
+    <div class="panel">
+      <h2 style="font-size:15px">交易所 Exchanges</h2>
+      <div id="ftExchanges" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+    <!-- Pairlist -->
+    <div class="panel">
+      <h2 style="font-size:15px">Pairlist 过滤器</h2>
+      <div id="ftPairlists" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+    <!-- FreqAI -->
+    <div class="panel">
+      <h2 style="font-size:15px">FreqAI 模型</h2>
+      <div id="ftFreqAI" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+    <!-- Hyperopt Loss -->
+    <div class="panel">
+      <h2 style="font-size:15px">Hyperopt 损失函数</h2>
+      <div id="ftHyperopt" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+    <!-- 保护策略 -->
+    <div class="panel">
+      <h2 style="font-size:15px">保护策略 Protections</h2>
+      <div id="ftProtections" class="ft-list"><span class="hint">未加载</span></div>
+    </div>
+  </div>
+
+  <!-- 历史 K 线 -->
+  <div class="panel" style="margin-top:14px">
+    <h2>历史 K 线数据</h2>
+    <div class="hint">从 user_data/data/ 加载已下载的 OHLCV 数据。</div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field"><label>交易对</label><input id="ftPair" value="BTC/USDT" /></div>
+      <div class="field"><label>周期</label><select id="ftTf">
+        <option>5m</option><option>15m</option><option>30m</option>
+        <option selected>1h</option><option>4h</option><option>1d</option>
+      </select></div>
+      <div class="field"><label>时间范围 (timerange)</label><input id="ftTr" placeholder="如 20240101-20240601（留空=全部）" /></div>
+      <div style="display:flex;gap:8px">
+        <button id="ftHistBtn" type="button">加载 K 线</button>
+        <button id="ftDataFilesBtn" class="ghost" type="button">查看数据文件</button>
+      </div>
+    </div>
+    <div id="ftHistResult"></div>
+  </div>
+
+  <!-- 回测 -->
+  <div class="panel" style="margin-top:14px">
+    <h2>回测 Backtest</h2>
+    <div class="hint">选择策略和参数后运行回测（需要本地已有历史数据）。结果含总交易数、收益、夏普、最大回撤等。</div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field"><label>策略</label><select id="ftBtStrategy"><option value="">先加载策略…</option></select></div>
+      <div class="field"><label>交易所</label><select id="ftBtExchange"><option value="">先加载…</option></select></div>
+      <div class="field"><label>品种（逗号分隔）</label><input id="ftBtPairs" value="BTC/USDT" /></div>
+    </div>
+    <div class="row" style="margin-bottom:12px">
+      <div class="field"><label>K线周期</label><select id="ftBtTf">
+        <option>5m</option><option>15m</option><option>30m</option>
+        <option selected>1h</option><option>4h</option><option>1d</option>
+      </select></div>
+      <div class="field"><label>时间范围</label><input id="ftBtTr" value="20240101-20240601" /></div>
+      <div class="field"><label>初始资金 (USDT)</label><input id="ftBtWallet" type="number" value="1000" /></div>
+      <div class="field"><label>最大同时持仓</label><input id="ftBtMaxTrades" type="number" value="3" /></div>
+    </div>
+    <button id="ftBtRunBtn" type="button">运行回测</button>
+    <div id="ftBtResult" style="margin-top:12px"></div>
   </div>
 </section>
 </main>
@@ -594,6 +686,157 @@ $("#repRunBtn").addEventListener("click", async ()=>{
     $("#repContent").innerHTML = `<pre class="err">报告生成失败: ${e.message}</pre>`;
   }finally{ btn.disabled = false; }
 });
+
+/* ======================= ⑤ Freqtrade 引擎 ======================= */
+function renderFtList(elId, items, nameKey, docKey, tagFn){
+  const el = $("#"+elId);
+  if(!items || items.length===0){ el.innerHTML = `<span class="hint">无数据</span>`; return; }
+  el.innerHTML = `<div class="ft-count">${items.length} 项</div>` + items.map(it=>{
+    const tag = tagFn ? tagFn(it) : "";
+    const doc = it[docKey||"doc"] || "";
+    return `<div class="ft-item">
+      <span class="nm">${it[nameKey||"name"]}</span>
+      ${doc ? `<span class="dc">${doc}</span>` : `<span class="dc" style="opacity:.5">—</span>`}
+      ${tag ? `<span class="tg">${tag}</span>` : ""}
+    </div>`;
+  }).join("");
+}
+async function ftLoadAll(){
+  const btn = $("#ftLoadAllBtn"); btn.disabled = true; btn.textContent = "加载中…";
+  try{
+    const [strats, exs, pls, fai, hls, pros] = await Promise.all([
+      renderJSON(await api("/api/v1/freqtrade/strategies")),
+      renderJSON(await api("/api/v1/freqtrade/exchanges")),
+      renderJSON(await api("/api/v1/freqtrade/pairlists")),
+      renderJSON(await api("/api/v1/freqtrade/freqai_models")),
+      renderJSON(await api("/api/v1/freqtrade/hyperopt_losses")),
+      renderJSON(await api("/api/v1/freqtrade/protections")),
+    ]);
+    // 策略
+    renderFtList("ftStrategies", strats.strategies, "name", "doc", it=>it.source);
+    // 回测策略下拉填充
+    const stratSel = $("#ftBtStrategy");
+    stratSel.innerHTML = strats.strategies.map(s=>`<option value="${s.name}">${s.name} (${s.source})</option>`).join("");
+    // 交易所
+    const exItems = exs.exchanges.map(e=>({name:e, doc:""}));
+    renderFtList("ftExchanges", exItems, "name", "doc");
+    // 回测交易所下拉
+    const exSel = $("#ftBtExchange");
+    exSel.innerHTML = exs.exchanges.map(e=>`<option value="${e}"${e==="binance"?" selected":""}>${e}</option>`).join("");
+    // Pairlist
+    renderFtList("ftPairlists", pls.pairlists, "name", "doc", it=>{
+      const b = it.bases||"";
+      return b.includes("gen") ? "生成器" : "过滤器";
+    });
+    // FreqAI
+    renderFtList("ftFreqAI", fai.models, "name", "doc");
+    // Hyperopt
+    renderFtList("ftHyperopt", hls.losses, "name", "doc", it=>it.short_name);
+    // Protections
+    renderFtList("ftProtections", pros.protections, "name", "doc");
+  }catch(e){
+    $("#ftStrategies").innerHTML = `<pre class="err">加载失败: ${e.message}</pre>`;
+  }finally{ btn.disabled = false; btn.textContent = "重新加载"; }
+}
+$("#ftLoadAllBtn").addEventListener("click", ftLoadAll);
+
+// 历史 K 线
+$("#ftHistBtn").addEventListener("click", async ()=>{
+  const pair = encodeURIComponent($("#ftPair").value.trim());
+  const tf = $("#ftTf").value;
+  const tr = $("#ftTr").value.trim();
+  let url = `/api/v1/freqtrade/pair_history?pair=${pair}&timeframe=${tf}`;
+  if(tr) url += `&timerange=${encodeURIComponent(tr)}`;
+  try{
+    const d = await renderJSON(await api(url));
+    $("#ftHistResult").innerHTML = `
+      <div class="kv" style="margin-bottom:10px">
+        <div><div class="k">交易对</div><div class="v">${d.pair}</div></div>
+        <div><div class="k">周期</div><div class="v">${d.timeframe}</div></div>
+        <div><div class="k">总行数</div><div class="v">${d.total_rows}</div></div>
+        <div><div class="k">返回行数</div><div class="v">${d.returned_rows}</div></div>
+        <div><div class="k">起始</div><div class="v" style="font-size:12px">${d.first_date}</div></div>
+        <div><div class="k">结束</div><div class="v" style="font-size:12px">${d.last_date}</div></div>
+      </div>
+      <table><thead><tr><th>日期</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead>
+      <tbody>${d.ohlcv.slice(-100).reverse().map(c=>`<tr>
+        <td style="font-size:11px">${c.date.slice(0,19)}</td>
+        <td>${fmt(c.open)}</td><td>${fmt(c.high)}</td><td>${fmt(c.low)}</td><td>${fmt(c.close)}</td><td>${fmt(c.volume,0)}</td>
+      </tr>`).join("")}</tbody></table>
+    `;
+    $("#tab-freqtrade").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#ftHistResult").innerHTML = `<pre class="err">${e.message}</pre>`;
+  }
+});
+
+// 数据文件列表
+$("#ftDataFilesBtn").addEventListener("click", async ()=>{
+  try{
+    const d = await renderJSON(await api("/api/v1/freqtrade/data_files"));
+    let html = `<div class="ft-count">${Object.keys(d.exchanges).length} 个交易所目录</div>`;
+    for(const [ex, files] of Object.entries(d.exchanges)){
+      html += `<div style="margin-bottom:8px"><b>${ex}</b> (${files.length} 文件)<br/><span style="font-size:11px;color:var(--muted)">${files.slice(0,10).join(", ")}${files.length>10?` … +${files.length-10}`:""}</span></div>`;
+    }
+    if(!Object.keys(d.exchanges).length) html = `<span class="hint">user_data/data/ 为空，请先下载数据</span>`;
+    $("#ftHistResult").innerHTML = html;
+  }catch(e){
+    $("#ftHistResult").innerHTML = `<pre class="err">${e.message}</pre>`;
+  }
+});
+
+// 回测
+$("#ftBtRunBtn").addEventListener("click", async ()=>{
+  const btn = $("#ftBtRunBtn"); btn.disabled = true; btn.textContent = "回测中…";
+  try{
+    const payload = {
+      strategy: $("#ftBtStrategy").value,
+      exchange: $("#ftBtExchange").value,
+      pairs: $("#ftBtPairs").value.split(",").map(s=>s.trim()).filter(Boolean),
+      timeframe: $("#ftBtTf").value,
+      timerange: $("#ftBtTr").value,
+      dry_run_wallet: Number($("#ftBtWallet").value)||1000,
+      max_open_trades: Number($("#ftBtMaxTrades").value)||3,
+    };
+    const d = await renderJSON(await apiPost("/api/v1/freqtrade/backtest", payload));
+    let html = `<span class="chip buy">${d.status}</span>`;
+    if(d.detail){ html += `<div style="margin-top:8px">${d.detail}</div>`; }
+    if(d.strategies){
+      html += `<table style="margin-top:10px"><thead><tr>
+        <th>策略</th><th>交易数</th><th>总收益</th><th>夏普</th><th>Sortino</th><th>Calmar</th><th>最大回撤</th><th>胜率</th><th>最佳</th><th>最差</th>
+      </tr></thead><tbody>`;
+      d.strategies.forEach(s=>{
+        const st = d[s];
+        html += `<tr>
+          <td><b>${s}</b></td>
+          <td>${st.total_trades}</td>
+          <td style="color:${st.profit_total>=0?'var(--ok)':'var(--err)'}">${fmtPct(st.profit_total)}</td>
+          <td>${fmt(st.sharpe)}</td>
+          <td>${fmt(st.sortino)}</td>
+          <td>${fmt(st.calmar)}</td>
+          <td style="color:var(--err)">${fmtPct(st.max_drawdown)}</td>
+          <td>${fmtPct(st.winrate)}</td>
+          <td>${st.best_pair||"-"}</td>
+          <td>${st.worst_pair||"-"}</td>
+        </tr>`;
+      });
+      html += `</tbody></table>`;
+    }
+    $("#ftBtResult").innerHTML = html;
+    $("#tab-freqtrade").scrollIntoView({behavior:"smooth", block:"start"});
+  }catch(e){
+    $("#ftBtResult").innerHTML = `<pre class="err">回测失败: ${e.message}</pre>`;
+  }finally{ btn.disabled = false; btn.textContent = "运行回测"; }
+});
+
+// 进入 Freqtrade tab 时自动加载一次
+const ftObserver = new MutationObserver(()=>{
+  if($("#tab-freqtrade").style.display!=="none" && !$("#ftStrategies").dataset.loaded){
+    ftLoadAll();
+    $("#ftStrategies").dataset.loaded = "1";
+  }
+});
+ftObserver.observe($("#tab-freqtrade"), {attributes:true, attributeFilter:["style"]});
 </script>
 </body>
 </html>
